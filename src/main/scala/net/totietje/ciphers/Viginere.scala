@@ -1,7 +1,11 @@
 package net.totietje.ciphers
 
-case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijklmnopqrstuvwxyz") {
-  
+case class Viginere(ciphertext: String)(implicit language: Language) {
+  /**
+    * Lower case version of ciphertext, which does not include any of the characters outside the given alphabet.
+    */
+  val clean: String = ciphertext.filter(language.isInAlphabet).toLowerCase
+
   /**
     * Does a best guess of the key, given only the expected frequencies of the output.
     *
@@ -10,12 +14,12 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
     *
     * If the provided frequencies are correct, and the ciphertext long enough, this will likely get the key.
     */
-  def bestGuess(implicit frequencies: Map[Char, Double]): Option[(String, String)] = {
+  def bestGuess: Option[(String, String)] = {
     (2 to 10).flatMap(bestGuess(_)).sortBy {
-      case (_, plaintext) => Utils.chiSquared(plaintext)
+      case (_, plaintext) => language.chiSquared(plaintext)
     }.headOption
   }
-  
+
   /**
     * Does a best guess of what the plaintext is, given the minimum substring length it should look for.
     *
@@ -26,10 +30,10 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
     *
     * On success, will return Some((key, plaintext))
     */
-  def bestGuess(repetitionLength: Int)(implicit frequencies: Map[Char, Double]): Option[(String, String)] = {
+  def bestGuess(repetitionLength: Int): Option[(String, String)] = {
     keyLengthGuess(repetitionLength).map(frequencyAnalysis)
   }
-  
+
   /**
     * Applies each key in the iterator to the ciphertext and calculates the chi squared value of the ciphertext.
     *
@@ -40,32 +44,30 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
     * Care should be taken not to load all the iterator into memory at once (so no calling .toList), as this will
     * likely result in running out of memory.
     */
-  def bruteForce(keys: Iterator[String])
-    (implicit alphabet: String, frequencies: Map[Char, Double]): Iterator[(String, String, Double)] = {
-    
+  def bruteForce(keys: Iterator[String]): Iterator[(String, String, Double)] = {
     for (key <- keys) yield {
       val decoded = decrypt(key)
-      val distance = Utils.chiSquared(decoded)
+      val distance = language.chiSquared(decoded)
       (key, decoded, distance)
     }
   }
-  
+
   /**
     * Given the plaintext and the key length, finds the key
     */
   def findKey(plaintext: String, keyLength: Int): String = {
-    ciphertext.take(keyLength).zip(plaintext).map {
-      case (a, b) => Caesar.Backwards(a, b)
+    clean.take(keyLength).zip(plaintext).map {
+      case (a, b) => CaesarShift.Backwards(a, b)
     }.mkString
   }
-  
+
   /**
     * Decrypts the code with a known key
     */
   def decrypt(key: String): String = {
-    Viginere.viginere(ciphertext, key)(Caesar.Backwards)
+    Viginere.viginere(ciphertext, key)(CaesarShift.Backwards)
   }
-  
+
   /**
     * Takes a guess at the key length by looking at the gaps between repetitions of a certain length, and taking their
     * gcd
@@ -74,29 +76,22 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
     case iterable if iterable.isEmpty => None // No gaps detected
     case gaps => Some(gaps.reduce(Utils.gcd))
   }
-  
+
   /**
-    * Does frequency analysis on all the `5n + k`th elements, where `n` is the key length and k is an arbitrary integer
-    * between 0 (inclusive) and n (exclusive). For each index in the key, this finds the optimal character which
-    * minimizes chi squared distance from expected frequencies, for all the characters in the text which are caesar
-    * shifted by this character. When the key length is known, this will likely find the key, or something very close to
+    * If `n` is the key length, then for every `k` between 0 (inclusive) and n (exclusive) this takes all the `an + k`th
+    * elements - that is, all the elements which have been caesar shifted by the same letter. Frequency analysis is then
+    * performed on the generated strings to find the associated character which minimises chi squared. When the key
+    * length is known, this will likely find the key, or something very close to
     * it.
     */
-  def frequencyAnalysis(keyLength: Int)(implicit frequencies: Map[Char, Double]): (String, String) = {
-    val (key, optimisedTranspose) = transpose(keyLength).map(Viginere.optimalCaesarShift).unzip
-    
-    // Reverse the transpose to extract plaintext
-    val untransposedOptions = optimisedTranspose.head.indices.flatMap { i =>
-      optimisedTranspose.flatMap { row =>
-        row.lift(i)
-      }
-    }
-    
-    (key.mkString, untransposedOptions.mkString)
+  def frequencyAnalysis(keyLength: Int): (String, String) = {
+    val (keySeq, _) = transpose(keyLength).map(Caesar(_).bestGuess).unzip
+    val key = keySeq.mkString
+    (key, decrypt(key))
   }
-  
+
   /**
-    * Safely transposes the code, returning a sequence of all the strings whose characters are `keyLength` apart.
+    * Safely transposes the cleaned ciphertext, returning a sequence of all the strings whose characters are `keyLength` apart.
     *
     * Eg, abcdefghijklmnopqr with keyLength 4:
     *
@@ -110,13 +105,13 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
     */
   private def transpose(keyLength: Int): Seq[String] = {
     val transposeOption = for (j <- 0 until keyLength) yield {
-      for (i <- 0 until ciphertext.length by keyLength) yield {
-        ciphertext.lift(i + j)
+      for (i <- 0 until clean.length by keyLength) yield {
+        clean.lift(i + j)
       }
     }
     transposeOption.map(_.flatten.mkString)
   }
-  
+
   /**
     * Counts how many times substrings are repeated in the code
     *
@@ -127,7 +122,7 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
     */
   def gaps(repetitionsLength: Int): Map[Int, Int] = {
     // For each n letters in a row, get their indices and group same combinations together
-    ciphertext.sliding(repetitionsLength).zipWithIndex.toList.groupBy(_._1).map {
+    clean.sliding(repetitionsLength).zipWithIndex.toList.groupBy(_._1).map {
       // Now ignore everything except for the indices of repetitions
       case (_, list) => list.map(_._2)
     }.flatMap { indices =>
@@ -142,35 +137,20 @@ case class Viginere(ciphertext: String)(implicit alphabet: String = "abcdefghijk
 }
 
 object Viginere {
-  def encrypt(plaintext: String, key: String)(implicit alphabet: String): String = {
-    viginere(plaintext, key)(Caesar.Forwards)
-  }
-  
-  private def viginere(text: String, key: String)(caesar: Caesar)(implicit alphabet: String): String = {
-    // Split the string into key length sized chunks
-    (for (chunk <- text.grouped(key.length)) yield {
-      /* Pair each chunk with a key letter
-       * Eg, with key 'key' and code 'abcdefg':
-       *
-       * key key k
-       * abc def g
-       */
-      chunk.zip(key).map {
-        // Apply rotation to letter
-        case (a, b) => caesar(a, b)
-      }.mkString
-    }).mkString
-  }
-  
   /**
-    * Find the Caesar shift that matches up closes with expected letter frequencies
+    * Encypts the given plaintext with the given key
     */
-  private def optimalCaesarShift(str: String)(implicit alphabet: String, frequencies: Map[Char, Double]): (Char, String) = {
-    // Apply every possible caesar shift
-    val possibilities = for (by <- alphabet) yield {
-      (by, Caesar.Backwards(str, by))
-    }
-    // Then find the one with minimum distance
-    possibilities.minBy(x => Utils.chiSquared(x._2))
+  def encrypt(plaintext: String, key: String)(implicit language: Language): String = {
+    viginere(plaintext, key)(CaesarShift.Forwards)
+  }
+
+  private def viginere(text: String, key: String)(caesar: CaesarShift)(implicit language: Language): String = {
+    text.foldLeft(("", 0)) {
+      case ((current, len), c) => if (language.isInAlphabet(c)) {
+         (current + caesar(c, key(len)), (len + 1) % key.length)
+      } else {
+        (current + c, len)
+      }
+    }._1
   }
 }

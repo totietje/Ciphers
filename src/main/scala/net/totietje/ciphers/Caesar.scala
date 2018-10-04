@@ -1,27 +1,33 @@
 package net.totietje.ciphers
 
-sealed trait Caesar {
-  def apply(char: Char, by: Char)(implicit alphabet: String): Char = {
-    val rotated = rotate(alphabet.indexOf(char), alphabet.indexOf(by))
-    val l = alphabet.length
-    val index = ((rotated % l) + l) % l
-  
-    alphabet(index)
+case class Caesar(ciphertext: String)(implicit language: Language) {
+  def decrypt(key: Char): String = {
+    CaesarShift.Backwards(ciphertext, key)
   }
-  
-  def rotate(a: Int, b: Int): Int
-  
-  def apply(string: String, by: Char)(implicit alphabet: String): String = for (char <- string) yield {
-    apply(char, by)
+
+  def decrypt(key: Int): String = {
+    CaesarShift.Backwards(ciphertext, key)
+  }
+
+  /**
+    * Runs through all possible caesar shifts and selects the key that minimises chi squared.
+    */
+  def bestGuess: (Char, String) = {
+    // Apply every possible caesar shift
+    val possibilities = for (by <- language.lowerCase) yield {
+      (by, CaesarShift.Backwards(ciphertext, by))
+    }
+    // Then find the one with minimum distance
+    possibilities.minBy(x => language.chiSquared(x._2))
   }
 }
 
 object Caesar {
-  case object Forwards extends Caesar {
-    override def rotate(a: Int, b: Int): Int = a + b
+  def encrypt(plaintext: String, key: Char)(implicit language: Language): String = {
+    CaesarShift.Forwards(plaintext, key)
   }
-  
-  case object Backwards extends Caesar {
-    override def rotate(a: Int, b: Int): Int = a - b
+
+  def encrypt(plaintext: String, key: Int)(implicit language: Language): String = {
+    CaesarShift.Forwards(plaintext, key)
   }
 }
