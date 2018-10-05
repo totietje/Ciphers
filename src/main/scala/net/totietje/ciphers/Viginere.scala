@@ -12,7 +12,7 @@ case class Viginere(ciphertext: String)(implicit language: Language) {
     * This does a best guess for each substring length between 2 and 10 inclusive, determining which guess is best based
     * on chi squared.
     *
-    * If the provided frequencies are correct, and the ciphertext long enough, this will likely get the key.
+    * If the provided frequencies are correct, and the ciphertext long enough, this will likely get the key 
     */
   def bestGuess: Option[(String, String)] = {
     (2 to 10).flatMap(bestGuess(_)).sortBy {
@@ -21,12 +21,15 @@ case class Viginere(ciphertext: String)(implicit language: Language) {
   }
 
   /**
-    * Does a best guess of what the plaintext is, given the minimum substring length it should look for.
+    * Does a best guess of what the plaintext is.
     *
-    * First takes a guess at the key length by looking for repeated substrings of a given length, and then
+    * First takes a guess at the key length by looking for repeated substrings of the given length, and then
     * uses frequency analysis to determine the key.
     *
-    * It may fail if no substrings of the given length are found, returning None.
+    * Long text will usually have more, longer repeats but may also have more coincidental repeats so the
+    * repetitionLength should be increased.
+    *
+    * It may fail if no repeated substrings of the given length are found, returning None.
     *
     * On success, will return Some((key, plaintext))
     */
@@ -81,8 +84,7 @@ case class Viginere(ciphertext: String)(implicit language: Language) {
     * If `n` is the key length, then for every `k` between 0 (inclusive) and n (exclusive) this takes all the `an + k`th
     * elements - that is, all the elements which have been caesar shifted by the same letter. Frequency analysis is then
     * performed on the generated strings to find the associated character which minimises chi squared. When the key
-    * length is known, this will likely find the key, or something very close to
-    * it.
+    * length is known, this will likely find the key, or something very close to it.
     */
   def frequencyAnalysis(keyLength: Int): (String, String) = {
     val (keySeq, _) = transpose(keyLength).map(Caesar(_).bestGuess).unzip
@@ -138,7 +140,7 @@ case class Viginere(ciphertext: String)(implicit language: Language) {
 
 object Viginere {
   /**
-    * Encypts the given plaintext with the given key
+    * Encrypts the given plaintext with the given key
     */
   def encrypt(plaintext: String, key: String)(implicit language: Language): String = {
     viginere(plaintext, key)(CaesarShift.Forwards)
